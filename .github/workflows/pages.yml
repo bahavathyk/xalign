@@ -24,6 +24,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python scripts/export_dashboard_data.py
+      - run: python -c "import json; json.load(open('docs/data/dashboard.json', encoding='utf-8'))"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

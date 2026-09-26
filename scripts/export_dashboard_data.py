@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -21,8 +22,14 @@ def serialise_records(explanation_frames):
     records = []
     for method, frame in explanation_frames.items():
         for row in frame.itertuples(index=False):
-            records.append({"method": method, "feature": row.Feature, "category": row.Category,
-                            "class": int(row.Class), "bin": int(row.Bin), "importance": float(row.Importance)})
+            category = row.Category
+            if category != category:  # pandas NaN; JSON has null, not NaN.
+                category = None
+            importance = float(row.Importance)
+            if not math.isfinite(importance):
+                importance = 0.0
+            records.append({"method": method, "feature": row.Feature, "category": category,
+                            "class": int(row.Class), "bin": int(row.Bin), "importance": importance})
     return records
 
 
@@ -49,7 +56,7 @@ def main():
     payload = {"schemaVersion": 1, "classes": data.classes, "methods": list(explanations),
                "features": features, "bins": by_bins}
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    OUTPUT.write_text(json.dumps(payload, separators=(",", ":"), allow_nan=False), encoding="utf-8")
     print(f"Wrote {OUTPUT} ({OUTPUT.stat().st_size:,} bytes)")
 
 
