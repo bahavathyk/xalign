@@ -9,8 +9,9 @@ const mean = (values) => values.length ? values.reduce((sum, value) => sum + val
 function selectedRecords(method, feature, classValue) {
   return records().filter((row) => row.method === method && row.feature === feature && row.class === classValue);
 }
-function importanceLimit() {
-  return Math.max(...records().map((row) => Math.abs(row.importance)), 1);
+function importanceLimit(features) {
+  const selected = records().filter((row) => features.includes(row.feature) && row.class === state.classValue);
+  return Math.max(...selected.map((row) => Math.abs(row.importance)), 1e-6);
 }
 function chartLayout(title, height = 560) {
   return { title: { text: title, x: 0.01, font: { size: 18 } }, height, autosize: true,
@@ -30,7 +31,8 @@ function matrixFor(method, feature, classValue) {
 }
 function heatmapTrace(matrix, labels, method, limit, axes = {}) {
   return { type: "heatmap", z: matrix, y: labels, x: matrix[0].map((_, index) => index), name: method,
-    colorscale: "RdBu", zmid: 0, zmin: -limit, zmax: limit, colorbar: { title: "Mean signed<br>importance" },
+    colorscale: [[0, "#2166ac"], [0.5, "#f7f7f7"], [1, "#b2182b"]], zmid: 0, zmin: -limit, zmax: limit,
+    colorbar: { title: "Mean signed<br>importance" },
     xaxis: axes.xaxis, yaxis: axes.yaxis, hovertemplate: `${method}<br>%{y}<br>Bin %{x}: %{z:.3f}<extra></extra>` };
 }
 function ruleTotal(feature, category, classValue) {
@@ -49,7 +51,7 @@ function drawOverview() {
 function drawCategorical() {
   const feature = state.feature;
   const meta = state.data.features.find((item) => item.name === feature);
-  const limit = importanceLimit();
+  const limit = importanceLimit([feature]);
   const traces = [{ type: "bar", orientation: "h", name: "Rules", x: meta.categories.map((category) => ruleTotal(feature, category, state.classValue)), y: meta.categories,
     marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y", hovertemplate: "Rules<br>%{y}: %{x}<extra></extra>" }];
   state.data.methods.forEach((method, index) => {
@@ -59,12 +61,14 @@ function drawCategorical() {
   const layout = { ...chartLayout(`${feature.replaceAll("_", " ")} · categorical comparison`, Math.max(500, meta.categories.length * 36)),
     grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: { automargin: true },
     xaxis2: { title: "Category state" }, xaxis3: { title: "Category state" }, xaxis4: { title: "Category state" },
-    yaxis2: { automargin: true }, yaxis3: { automargin: true }, yaxis4: { automargin: true }, showlegend: false };
+    yaxis2: { automargin: true, showticklabels: false }, yaxis3: { automargin: true, showticklabels: false }, yaxis4: { automargin: true, showticklabels: false },
+    annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
+    showlegend: false };
   Plotly.react($("categorical-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
 function drawNumeric() {
   const features = numericFeatures().map((item) => item.name);
-  const limit = importanceLimit();
+  const limit = importanceLimit(features);
   const traces = [{ type: "bar", orientation: "h", name: "Rules", x: features.map((feature) => ruleTotal(feature, null, state.classValue)),
     y: features.map((name) => name.replaceAll("_", " ")), marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y" }];
   state.data.methods.forEach((method, index) => {
@@ -74,7 +78,9 @@ function drawNumeric() {
   const layout = { ...chartLayout("Numerical features · comparison", Math.max(560, features.length * 36)),
     grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: { automargin: true },
     xaxis2: { title: "Value bin" }, xaxis3: { title: "Value bin" }, xaxis4: { title: "Value bin" },
-    yaxis2: { automargin: true }, yaxis3: { automargin: true }, yaxis4: { automargin: true }, showlegend: false };
+    yaxis2: { automargin: true, showticklabels: false }, yaxis3: { automargin: true, showticklabels: false }, yaxis4: { automargin: true, showticklabels: false },
+    annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
+    showlegend: false };
   Plotly.react($("numeric-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
 function drawAll() {
