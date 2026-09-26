@@ -2,16 +2,23 @@
 
 ## Interactive dashboard
 
-Open the hosted Dash visualisation: **[XAlign interactive dashboard](https://xalign-dashboard.onrender.com)**
+After GitHub Pages is enabled, open the browser-based dashboard at:
 
-The dashboard is hosted as a Python web service, so the link above opens the live interactive app in a browser. The first request on Render's free plan may take a little longer while the service wakes up.
+**https://bahavathyk.github.io/xalign/**
 
-To deploy your own instance on Render:
+The static frontend runs entirely in the browser. Python is used only during the GitHub Actions build to train the model and export the compact analysis data consumed by the JavaScript application.
 
-1. Create a new Render Web Service from this GitHub repository.
-2. Render will read [`render.yaml`](render.yaml), install the dependencies, and start the app with Gunicorn.
-3. Replace the dashboard URL above with the URL Render gives your service.
+## Local development
 
-Run `pip install -r requirements.txt`, then `python main.py` from this directory.
+Install the Python dependencies and generate the static dataset:
 
-The dashboard trains a Random Forest on the UCI German Credit data and presents TreeSHAP, KernelSHAP, and LIME in parallel. Categorical variables retain their original feature name and reveal their categories; one-hot encoder column names are never shown. Every explanation panel shares one signed colour scale, and compact rule markers are overlaid without obscuring the heatmap.
+```text
+pip install -r requirements.txt
+python scripts/export_dashboard_data.py
+```
+
+Then serve `docs/` with any static web server, for example `python -m http.server 8000 --directory docs`, and open `http://localhost:8000`.
+
+The GitHub Actions workflow in `.github/workflows/pages.yml` regenerates the data and publishes `docs/` whenever `main` changes. In the repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
+
+The dashboard compares TreeSHAP, KernelSHAP, and LIME explanations for the UCI German Credit model, with rule counts overlaid through the shared controls.

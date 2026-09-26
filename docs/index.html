@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Interactive German Credit explainability dashboard">
+    <title>XAlign · German Credit Visual Analytics</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <p class="eyebrow">XAlign · browser edition</p>
+        <h1>German Credit Visual Analytics</h1>
+        <p>Compare TreeSHAP, KernelSHAP, and LIME explanations alongside the random-forest rules that support them.</p>
+      </header>
+      <section class="controls" aria-label="Dashboard controls">
+        <label>Predicted class <select id="class-select"></select></label>
+        <label>Numeric bins <input id="bin-slider" type="range" min="3" max="30" value="10"><output id="bin-value" for="bin-slider">10</output></label>
+        <label class="feature-control">Categorical feature <select id="feature-select"></select></label>
+      </section>
+      <nav class="tabs" aria-label="Visualization sections" role="tablist">
+        <button type="button" class="tab is-active" role="tab" aria-selected="true" aria-controls="overview-panel" data-panel="overview-panel">Overview</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" aria-controls="categorical-panel" data-panel="categorical-panel">Categorical features</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" aria-controls="numeric-panel" data-panel="numeric-panel">Numerical features</button>
+      </nav>
+      <section id="overview-panel" class="panel" role="tabpanel"><div id="overview-chart" class="chart" aria-label="Overview of mean absolute feature importance"></div></section>
+      <section id="categorical-panel" class="panel" role="tabpanel" hidden><div id="categorical-chart" class="chart" aria-label="Categorical feature explanation comparison"></div></section>
+      <section id="numeric-panel" class="panel" role="tabpanel" hidden><div id="numeric-chart" class="chart" aria-label="Numerical feature explanation comparison"></div></section>
+      <p id="status" class="status" aria-live="polite">Loading exported analysis…</p>
+      <footer><a href="https://github.com/bahavathyk/xalign">View source on GitHub</a></footer>
+    </main>
+  </body>
+</html>

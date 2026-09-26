@@ -3,26 +3,18 @@ from __future__ import annotations
 
 import os
 
+from analysis import build_analysis
 from dashboard import create_app
-from explainers import compute_kernel_shap, compute_lime, compute_tree_shap
-from preprocessing import train_model
-from rules import extract_rules
 
 
 def build_app():
     """Train the analysis and return the configured Dash application."""
-    data = train_model()
-    rules = extract_rules(data.pipeline)
-    explanations = {"TreeSHAP": compute_tree_shap(data)}
-    for name, factory in (("KernelSHAP", compute_kernel_shap), ("LIME", compute_lime)):
-        try:
-            explanations[name] = factory(data)
-        except Exception as error:
-            raise RuntimeError(f"{name} could not be computed; all three methods are required.") from error
+    data, rules, explanations = build_analysis()
     return create_app(data, rules, explanations)
 
 
-# Gunicorn/Render imports this WSGI object as ``app:server``.
+# The Dash entry point is retained for local/server deployments; GitHub Pages uses
+# the static frontend in docs/ and the export script instead.
 app = build_app()
 server = app.server
 
