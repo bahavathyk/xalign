@@ -1,4 +1,4 @@
-const state = { data: null, classValue: null, bins: 10, feature: null };
+const state = { data: null, classValue: null, bins: 10, feature: null, showRules: false };
 const $ = (id) => document.getElementById(id);
 const numericFeatures = () => state.data.features.filter((feature) => feature.kind === "numerical");
 const categoricalFeatures = () => state.data.features.filter((feature) => feature.kind === "categorical");
@@ -30,14 +30,48 @@ function matrixFor(method, feature, classValue) {
   return { labels, matrix };
 }
 function heatmapTrace(matrix, labels, method, limit, axes = {}) {
-  return { type: "heatmap", z: matrix, y: labels, x: matrix[0].map((_, index) => index), name: method,
+  const rowIds = labels.map((_, index) => index);
+  return { type: "heatmap", z: matrix, y: rowIds, x: matrix[0].map((_, index) => index),
+    customdata: matrix.map((row, index) => row.map(() => labels[index])), name: method,
     colorscale: [[0, "#2166ac"], [0.5, "#f7f7f7"], [1, "#b2182b"]], zmid: 0, zmin: -limit, zmax: limit,
     colorbar: { title: "Mean signed<br>importance" },
-    xaxis: axes.xaxis, yaxis: axes.yaxis, hovertemplate: `${method}<br>%{y}<br>Bin %{x}: %{z:.3f}<extra></extra>` };
+    xaxis: axes.xaxis, yaxis: axes.yaxis, hovertemplate: `${method}<br>%{customdata}<br>Bin %{x}: %{z:.3f}<extra></extra>` };
 }
 function ruleTotal(feature, category, classValue) {
   return rules().filter((row) => row.feature === feature && row.category === category && row.class === classValue)
     .reduce((sum, row) => sum + row.count, 0);
+}
+function ruleCount(feature, category, bin, classValue) {
+  return rules().filter((row) => row.feature === feature && row.category === category && row.bin === bin && row.class === classValue)
+    .reduce((sum, row) => sum + row.count, 0);
+}
+function heatmapAxis(labels, showticklabels) {
+  return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels };
+}
+function overlayShapes(features, labelsByFeature, rowByFeature, axisIds, binCount) {
+  if (!state.showRules) return [];
+  const shapes = [];
+  axisIds.forEach((axisId) => features.forEach((feature) => {
+    const labels = labelsByFeature[feature];
+    const categorical = labels.length > 1;
+    const categories = categorical ? labels : [null];
+    const totalBins = categorical ? 2 : binCount;
+    const counts = categories.flatMap((category) => Array.from({ length: totalBins }, (_, bin) => ruleCount(feature, category, bin, state.classValue)));
+    const maximum = Math.max(...counts, 0);
+    if (!maximum) return;
+    categories.forEach((category, row) => {
+      const yCenter = rowByFeature[feature] + row;
+      for (let bin = 0; bin < totalBins; bin += 1) {
+        const count = ruleCount(feature, category, bin, state.classValue);
+        if (!count) continue;
+        const side = 0.55 * count / maximum;
+        shapes.push({ type: "rect", xref: `x${axisId}`, yref: `y${axisId}`,
+          x0: bin - side / 2, x1: bin + side / 2, y0: yCenter - side / 2, y1: yCenter + side / 2,
+          line: { color: "#111827", width: 1 }, fillcolor: "rgba(0,0,0,0)" });
+      }
+    });
+  }));
+  return shapes;
 }
 function drawOverview() {
   const features = state.data.features.map((item) => item.name);
@@ -52,16 +86,18 @@ function drawCategorical() {
   const feature = state.feature;
   const meta = state.data.features.find((item) => item.name === feature);
   const limit = importanceLimit([feature]);
-  const traces = [{ type: "bar", orientation: "h", name: "Rules", x: meta.categories.map((category) => ruleTotal(feature, category, state.classValue)), y: meta.categories,
-    marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y", hovertemplate: "Rules<br>%{y}: %{x}<extra></extra>" }];
+  const traces = [{ type: "bar", orientation: "h", name: "Rules", x: meta.categories.map((category) => ruleTotal(feature, category, state.classValue)), y: meta.categories.map((_, index) => index), customdata: meta.categories,
+    marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y", hovertemplate: "Rules<br>%{customdata}: %{x}<extra></extra>" }];
   state.data.methods.forEach((method, index) => {
     const { labels, matrix } = matrixFor(method, feature, state.classValue);
     traces.push(heatmapTrace(matrix, labels, method, limit, { xaxis: `x${index + 2}`, yaxis: `y${index + 2}` }));
   });
+  const labelsByFeature = { [feature]: meta.categories };
   const layout = { ...chartLayout(`${feature.replaceAll("_", " ")} · categorical comparison`, Math.max(500, meta.categories.length * 36)),
-    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: { automargin: true },
+    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: heatmapAxis(meta.categories, true),
     xaxis2: { title: "Category state" }, xaxis3: { title: "Category state" }, xaxis4: { title: "Category state" },
-    yaxis2: { automargin: true, showticklabels: false }, yaxis3: { automargin: true, showticklabels: false }, yaxis4: { automargin: true, showticklabels: false },
+    yaxis2: heatmapAxis(meta.categories, false), yaxis3: heatmapAxis(meta.categories, false), yaxis4: heatmapAxis(meta.categories, false),
+    shapes: overlayShapes([feature], labelsByFeature, { [feature]: 0 }, [2, 3, 4], 2),
     annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
     showlegend: false };
   Plotly.react($("categorical-chart"), traces, layout, { responsive: true, displaylogo: false });
@@ -69,16 +105,21 @@ function drawCategorical() {
 function drawNumeric() {
   const features = numericFeatures().map((item) => item.name);
   const limit = importanceLimit(features);
+  const displayFeatures = features.map((name) => name.replaceAll("_", " "));
   const traces = [{ type: "bar", orientation: "h", name: "Rules", x: features.map((feature) => ruleTotal(feature, null, state.classValue)),
-    y: features.map((name) => name.replaceAll("_", " ")), marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y" }];
+    y: features.map((_, index) => index), customdata: displayFeatures, marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y",
+    hovertemplate: "Rules<br>%{customdata}: %{x}<extra></extra>" }];
   state.data.methods.forEach((method, index) => {
     const matrix = features.map((feature) => matrixFor(method, feature, state.classValue).matrix[0]);
     traces.push(heatmapTrace(matrix, features.map((name) => name.replaceAll("_", " ")), method, limit, { xaxis: `x${index + 2}`, yaxis: `y${index + 2}` }));
   });
-  const layout = { ...chartLayout("Numerical features · comparison", Math.max(560, features.length * 36)),
-    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: { automargin: true },
+  const labelsByFeature = Object.fromEntries(features.map((feature) => [feature, [feature]]));
+  const rowByFeature = Object.fromEntries(features.map((feature, index) => [feature, index]));
+  const layout = { ...chartLayout("Numerical features", Math.max(560, features.length * 36)),
+    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: heatmapAxis(displayFeatures, true),
     xaxis2: { title: "Value bin" }, xaxis3: { title: "Value bin" }, xaxis4: { title: "Value bin" },
-    yaxis2: { automargin: true, showticklabels: false }, yaxis3: { automargin: true, showticklabels: false }, yaxis4: { automargin: true, showticklabels: false },
+    yaxis2: heatmapAxis(displayFeatures, false), yaxis3: heatmapAxis(displayFeatures, false), yaxis4: heatmapAxis(displayFeatures, false),
+    shapes: overlayShapes(features, labelsByFeature, rowByFeature, [2, 3, 4], state.bins),
     annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
     showlegend: false };
   Plotly.react($("numeric-chart"), traces, layout, { responsive: true, displaylogo: false });
@@ -96,6 +137,7 @@ function setupControls() {
   $("class-select").addEventListener("change", (event) => { state.classValue = Number(event.target.value); drawAll(); });
   $("feature-select").addEventListener("change", (event) => { state.feature = event.target.value; drawCategorical(); });
   $("bin-slider").addEventListener("input", (event) => { state.bins = Number(event.target.value); $("bin-value").textContent = state.bins; drawAll(); });
+  $("rules-toggle").addEventListener("change", (event) => { state.showRules = event.target.checked; drawAll(); });
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => { item.classList.remove("is-active"); item.setAttribute("aria-selected", "false"); });
     document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = panel.id !== tab.dataset.panel; });
