@@ -1,4 +1,4 @@
-const state = { data: null, classValue: null, bins: 10, feature: null, showRules: false };
+const state = { data: null, defaultData: null, classValue: null, bins: 10, feature: null, showRules: false, pendingRows: null };
 const $ = (id) => document.getElementById(id);
 const numericFeatures = () => state.data.features.filter((feature) => feature.kind === "numerical");
 const categoricalFeatures = () => state.data.features.filter((feature) => feature.kind === "categorical");
@@ -21,7 +21,7 @@ function chartLayout(title, height = 560) {
 function matrixFor(method, feature, classValue) {
   const meta = state.data.features.find((item) => item.name === feature);
   const labels = meta.kind === "categorical" ? meta.categories : [feature];
-  const width = meta.kind === "categorical" ? 2 : state.bins;
+  const width = meta.kind === "categorical" ? (meta.states || 2) : state.bins;
   const matrix = labels.map(() => Array(width).fill(0));
   selectedRecords(method, feature, classValue).forEach((row) => {
     const y = meta.kind === "categorical" ? labels.indexOf(row.category) : 0;
@@ -48,14 +48,96 @@ function ruleCount(feature, category, bin, classValue) {
 function heatmapAxis(labels, showticklabels) {
   return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels };
 }
+function uniqueValues(rows, column) {
+  return [...new Set(rows.map((row) => String(row[column] ?? "").trim()).filter(Boolean))];
+}
+function isNumericColumn(rows, column) {
+  const values = rows.map((row) => String(row[column] ?? "").trim()).filter(Boolean);
+  return values.length > 0 && values.every((value) => Number.isFinite(Number(value)));
+}
+function fastDataset(rows, target, columns) {
+  const sampled = rows.filter((row) => String(row[target] ?? "").trim()).slice(0, 3000);
+  const classes = uniqueValues(sampled, target);
+  if (classes.length < 2) throw new Error("The target column must contain at least two values.");
+  if (classes.length > 20) throw new Error("The target column has too many unique values for a fast browser analysis.");
+  const features = columns.map((name) => {
+    const numerical = isNumericColumn(sampled, name);
+    return { name, kind: numerical ? "numerical" : "categorical", categories: numerical ? [] : uniqueValues(sampled, name).slice(0, 20), states: numerical ? 0 : 1 };
+  });
+  const byBins = {};
+  for (let binCount = 3; binCount <= 30; binCount += 1) {
+    const records = [];
+    const ruleRows = [];
+    features.forEach((feature) => {
+      const numericValues = feature.kind === "numerical" ? sampled.map((row) => Number(row[feature.name])).filter(Number.isFinite) : [];
+      let low = Math.min(...numericValues); let high = Math.max(...numericValues);
+      if (low === high) { low -= 0.5; high += 0.5; }
+      const totalByGroup = new Map();
+      const classByGroup = new Map();
+      sampled.forEach((row) => {
+        const raw = String(row[feature.name] ?? "").trim();
+        let group = raw;
+        if (feature.kind === "numerical") {
+          const value = Number(raw);
+          if (!Number.isFinite(value)) return;
+          group = Math.min(binCount - 1, Math.floor(((value - low) / (high - low)) * binCount));
+        } else if (!feature.categories.includes(group)) return;
+        const key = String(group);
+        totalByGroup.set(key, (totalByGroup.get(key) || 0) + 1);
+        if (!classByGroup.has(key)) classByGroup.set(key, new Map());
+        const counts = classByGroup.get(key);
+        const targetValue = String(row[target]).trim();
+        counts.set(targetValue, (counts.get(targetValue) || 0) + 1);
+      });
+      const groups = feature.kind === "categorical" ? feature.categories : Array.from({ length: binCount }, (_, index) => index);
+      classes.forEach((classValue) => {
+        const globalRate = sampled.filter((row) => String(row[target]).trim() === classValue).length / sampled.length;
+        groups.forEach((group) => {
+          const key = String(group); const total = totalByGroup.get(key) || 0;
+          if (!total) return;
+          const classCount = classByGroup.get(key)?.get(classValue) || 0;
+          records.push({ method: "Fast attribution", feature: feature.name, category: feature.kind === "categorical" ? group : null,
+            class: classValue, bin: feature.kind === "categorical" ? 0 : group, importance: classCount / total - globalRate });
+          ruleRows.push({ feature: feature.name, category: feature.kind === "categorical" ? group : null,
+            class: classValue, bin: feature.kind === "categorical" ? 0 : group, count: total });
+        });
+      });
+    });
+    byBins[String(binCount)] = { records, rules: ruleRows };
+  }
+  return { schemaVersion: 1, classes, methods: ["Fast attribution"], features, bins: byBins, ruleLabel: "Support count" };
+}
+function selectedFeatureNames() {
+  return [...document.querySelectorAll("#feature-picker input:checked")].map((input) => input.value);
+}
+function populateFeaturePicker(columns, target) {
+  const picker = $("feature-picker"); picker.replaceChildren();
+  columns.filter((column) => column !== target).forEach((column) => {
+    const label = document.createElement("label"); const input = document.createElement("input");
+    input.type = "checkbox"; input.value = column; input.checked = true; label.append(input, document.createTextNode(column)); picker.append(label);
+  });
+  picker.hidden = false; $("analyze-upload").disabled = false;
+}
+function showCustomFile(file) {
+  if (!window.Papa) throw new Error("The CSV parser is still loading; please try again.");
+  Papa.parse(file, { header: true, skipEmptyLines: true, complete: (result) => {
+    const columns = result.meta.fields || [];
+    if (!columns.length || !result.data.length) { $("upload-status").textContent = "The CSV has no readable rows or columns."; return; }
+    state.pendingRows = result.data;
+    $("target-select").replaceChildren(...columns.map((column) => new Option(column, column)));
+    $("target-field").hidden = false; populateFeaturePicker(columns, columns[0]);
+    $("upload-status").textContent = `${result.data.length.toLocaleString()} rows loaded. Choose a target and included columns.`;
+  }, error: (error) => { $("upload-status").textContent = `CSV could not be read: ${error.message}`; } });
+}
 function overlayShapes(features, labelsByFeature, rowByFeature, axisIds, binCount) {
   if (!state.showRules) return [];
   const shapes = [];
   axisIds.forEach((axisId) => features.forEach((feature) => {
     const labels = labelsByFeature[feature];
-    const categorical = labels.length > 1;
+    const meta = state.data.features.find((item) => item.name === feature);
+    const categorical = meta.kind === "categorical";
     const categories = categorical ? labels : [null];
-    const totalBins = categorical ? 2 : binCount;
+    const totalBins = categorical ? (meta.states || 2) : binCount;
     const counts = categories.flatMap((category) => Array.from({ length: totalBins }, (_, bin) => ruleCount(feature, category, bin, state.classValue)));
     const maximum = Math.max(...counts, 0);
     if (!maximum) return;
@@ -85,28 +167,31 @@ function drawOverview() {
 function drawCategorical() {
   const feature = state.feature;
   const meta = state.data.features.find((item) => item.name === feature);
+  const categories = meta.kind === "categorical" ? meta.categories : [feature];
   const limit = importanceLimit([feature]);
-  const traces = [{ type: "bar", orientation: "h", name: "Rules", x: meta.categories.map((category) => ruleTotal(feature, category, state.classValue)), y: meta.categories.map((_, index) => index), customdata: meta.categories,
+  const columnCount = state.data.methods.length + 1;
+  const methodAxes = state.data.methods.map((_, index) => index + 2);
+  const traces = [{ type: "bar", orientation: "h", name: state.data.ruleLabel || "Rules", x: categories.map((category) => ruleTotal(feature, meta.kind === "categorical" ? category : null, state.classValue)), y: categories.map((_, index) => index), customdata: categories,
     marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y", hovertemplate: "Rules<br>%{customdata}: %{x}<extra></extra>" }];
   state.data.methods.forEach((method, index) => {
     const { labels, matrix } = matrixFor(method, feature, state.classValue);
     traces.push(heatmapTrace(matrix, labels, method, limit, { xaxis: `x${index + 2}`, yaxis: `y${index + 2}` }));
   });
-  const labelsByFeature = { [feature]: meta.categories };
-  const layout = { ...chartLayout(`${feature.replaceAll("_", " ")} · categorical comparison`, Math.max(500, meta.categories.length * 36)),
-    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: heatmapAxis(meta.categories, true),
-    xaxis2: { title: "Category state" }, xaxis3: { title: "Category state" }, xaxis4: { title: "Category state" },
-    yaxis2: heatmapAxis(meta.categories, false), yaxis3: heatmapAxis(meta.categories, false), yaxis4: heatmapAxis(meta.categories, false),
-    shapes: overlayShapes([feature], labelsByFeature, { [feature]: 0 }, [2, 3, 4], 2),
-    annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
-    showlegend: false };
+  const labelsByFeature = { [feature]: categories };
+  const layout = { ...chartLayout(`${feature.replaceAll("_", " ")} · comparison`, Math.max(500, categories.length * 36)),
+    grid: { rows: 1, columns: columnCount, pattern: "independent" }, xaxis: { title: state.data.ruleLabel || "Rule count" }, yaxis: heatmapAxis(categories, true),
+    shapes: overlayShapes([feature], labelsByFeature, { [feature]: 0 }, methodAxes, meta.kind === "categorical" ? (meta.states || 2) : state.bins),
+    annotations: [state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })), showlegend: false };
+  methodAxes.forEach((axis, index) => { layout[`xaxis${axis}`] = { title: meta.kind === "categorical" ? "Category state" : "Value bin" }; layout[`yaxis${axis}`] = heatmapAxis(categories, false); });
   Plotly.react($("categorical-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
 function drawNumeric() {
   const features = numericFeatures().map((item) => item.name);
   const limit = importanceLimit(features);
   const displayFeatures = features.map((name) => name.replaceAll("_", " "));
-  const traces = [{ type: "bar", orientation: "h", name: "Rules", x: features.map((feature) => ruleTotal(feature, null, state.classValue)),
+  const columnCount = state.data.methods.length + 1;
+  const methodAxes = state.data.methods.map((_, index) => index + 2);
+  const traces = [{ type: "bar", orientation: "h", name: state.data.ruleLabel || "Rules", x: features.map((feature) => ruleTotal(feature, null, state.classValue)),
     y: features.map((_, index) => index), customdata: displayFeatures, marker: { color: "#9aa7b4" }, xaxis: "x", yaxis: "y",
     hovertemplate: "Rules<br>%{customdata}: %{x}<extra></extra>" }];
   state.data.methods.forEach((method, index) => {
@@ -116,28 +201,66 @@ function drawNumeric() {
   const labelsByFeature = Object.fromEntries(features.map((feature) => [feature, [feature]]));
   const rowByFeature = Object.fromEntries(features.map((feature, index) => [feature, index]));
   const layout = { ...chartLayout("Numerical features", Math.max(560, features.length * 36)),
-    grid: { rows: 1, columns: 4, pattern: "independent" }, xaxis: { title: "Rule count" }, yaxis: heatmapAxis(displayFeatures, true),
-    xaxis2: { title: "Value bin" }, xaxis3: { title: "Value bin" }, xaxis4: { title: "Value bin" },
-    yaxis2: heatmapAxis(displayFeatures, false), yaxis3: heatmapAxis(displayFeatures, false), yaxis4: heatmapAxis(displayFeatures, false),
-    shapes: overlayShapes(features, labelsByFeature, rowByFeature, [2, 3, 4], state.bins),
-    annotations: ["Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / 4, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
-    showlegend: false };
+    grid: { rows: 1, columns: columnCount, pattern: "independent" }, xaxis: { title: state.data.ruleLabel || "Rule count" }, yaxis: heatmapAxis(displayFeatures, true),
+    shapes: overlayShapes(features, labelsByFeature, rowByFeature, methodAxes, state.bins),
+    annotations: [state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })), showlegend: false };
+  methodAxes.forEach((axis) => { layout[`xaxis${axis}`] = { title: "Value bin" }; layout[`yaxis${axis}`] = heatmapAxis(displayFeatures, false); });
   Plotly.react($("numeric-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
 function drawAll() {
   drawOverview(); drawCategorical(); drawNumeric();
   $("status").textContent = `Showing predicted class ${state.classValue} with ${state.bins} numeric bins.`;
 }
-function setupControls() {
-  state.data.classes.forEach((value) => $("class-select").add(new Option(String(value), value)));
+function populateAnalysisControls() {
+  const classSelect = $("class-select"); classSelect.replaceChildren();
+  const classLabels = state.data.classLabels || state.data.classes;
+  state.data.classes.forEach((value, index) => classSelect.add(new Option(String(classLabels[index]), String(index))));
   state.classValue = state.data.classes[0];
-  categoricalFeatures().forEach((feature) => $("feature-select").add(new Option(feature.name.replaceAll("_", " "), feature.name)));
-  state.feature = categoricalFeatures()[0].name;
-  $("class-select").value = state.classValue; $("feature-select").value = state.feature;
-  $("class-select").addEventListener("change", (event) => { state.classValue = Number(event.target.value); drawAll(); });
+  const featureSelect = $("feature-select"); featureSelect.replaceChildren();
+  const featureChoices = categoricalFeatures().length ? categoricalFeatures() : state.data.features;
+  featureChoices.forEach((feature) => featureSelect.add(new Option(feature.name.replaceAll("_", " "), feature.name)));
+  state.feature = featureChoices[0]?.name;
+  classSelect.value = "0"; featureSelect.value = state.feature;
+}
+function setupControls() {
+  populateAnalysisControls();
+  $("class-select").addEventListener("change", (event) => { state.classValue = state.data.classes[Number(event.target.value)]; drawAll(); });
   $("feature-select").addEventListener("change", (event) => { state.feature = event.target.value; drawCategorical(); });
   $("bin-slider").addEventListener("input", (event) => { state.bins = Number(event.target.value); $("bin-value").textContent = state.bins; drawAll(); });
   $("rules-toggle").addEventListener("change", (event) => { state.showRules = event.target.checked; drawAll(); });
+  $("csv-upload").addEventListener("change", (event) => { const file = event.target.files[0]; if (file) showCustomFile(file); });
+  $("target-select").addEventListener("change", (event) => { const columns = Object.keys(state.pendingRows?.[0] || {}); populateFeaturePicker(columns, event.target.value); });
+  $("analyze-upload").addEventListener("click", () => {
+    try {
+      const target = $("target-select").value; const columns = selectedFeatureNames();
+      if (!columns.length) throw new Error("Select at least one feature column.");
+      const file = $("csv-upload").files[0];
+      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+        const form = new FormData(); form.append("file", file); form.append("target", target); columns.forEach((column) => form.append("features", column));
+        $("analyze-upload").disabled = true; $("upload-status").textContent = "Training Random Forest and computing XAI explanations…";
+        fetch("api/analyze", { method: "POST", body: form }).then(async (response) => {
+          const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Local analysis failed."); return payload;
+        }).then((payload) => {
+          state.data = payload; state.bins = 10; $("bin-slider").value = "10"; $("bin-value").textContent = "10";
+          populateAnalysisControls(); state.showRules = false; $("rules-toggle").checked = false; drawAll();
+          $("upload-status").textContent = "Custom dataset active. Results came from the local Python Random Forest + XAI pipeline.";
+        }).catch((error) => {
+          $("upload-status").textContent = error instanceof TypeError
+            ? "The local Python API is not reachable. Stop the static HTTP server and run local_server.py."
+            : error.message;
+        }).finally(() => { $("analyze-upload").disabled = false; });
+      } else {
+        state.data = fastDataset(state.pendingRows, target, columns); state.bins = 10; $("bin-slider").value = "10"; $("bin-value").textContent = "10";
+        populateAnalysisControls(); state.showRules = false; $("rules-toggle").checked = false; drawAll();
+        $("upload-status").textContent = "Custom browser-only attribution active. For exact XAI, run local_server.py.";
+      }
+    } catch (error) { $("upload-status").textContent = error.message; }
+  });
+  $("reset-dataset").addEventListener("click", () => {
+    state.data = state.defaultData; state.bins = 10; $("bin-slider").value = "10"; $("bin-value").textContent = "10";
+    state.showRules = false; $("rules-toggle").checked = false; populateAnalysisControls(); drawAll();
+    $("upload-status").textContent = "Using the built-in German Credit dataset.";
+  });
   document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => { item.classList.remove("is-active"); item.setAttribute("aria-selected", "false"); });
     document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = panel.id !== tab.dataset.panel; });
@@ -146,9 +269,11 @@ function setupControls() {
 }
 async function start() {
   try {
+    const localMode = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (!localMode) $("upload-panel").hidden = true;
     const response = await fetch("data/dashboard.json");
     if (!response.ok) throw new Error(`Could not load dashboard data (${response.status})`);
-    state.data = await response.json(); setupControls();
+    state.data = await response.json(); state.defaultData = state.data; setupControls();
     while (!window.Plotly) await new Promise((resolve) => setTimeout(resolve, 25));
     drawAll();
   } catch (error) { $("status").textContent = error.message; $("status").classList.add("error"); }

@@ -7,8 +7,9 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 
 from feature_metadata import build_feature_metadata
 
@@ -33,6 +34,7 @@ class GermanCreditData:
     classes: list[int]
     encoded_feature_names: list[str]
     metadata: dict
+    class_labels: list[str] | None = None
 
 
 def load_data(url: str = DATA_URL):
@@ -68,4 +70,39 @@ def train_model(url: str = DATA_URL, random_state: int = 42) -> GermanCreditData
         pipeline, np.asarray(train_encoded), np.asarray(test_encoded), y_test.to_numpy(),
         model.predict(test_encoded), [int(c) for c in model.classes_], names,
         build_feature_metadata(pre, categorical, numerical),
+    )
+
+
+def train_model_from_dataframe(frame: pd.DataFrame, target: str, features: list[str], random_state: int = 42):
+    """Train the same analysis model for a user-provided classification dataset."""
+    selected = frame[features].copy()
+    labels = frame[target].astype(str).str.strip()
+    valid = labels.ne("") & labels.notna()
+    selected, labels = selected.loc[valid], labels.loc[valid]
+    for column in selected.columns:
+        converted = pd.to_numeric(selected[column], errors="coerce")
+        non_empty = selected[column].notna() & selected[column].astype(str).str.strip().ne("")
+        if non_empty.any() and converted[non_empty].notna().all():
+            selected[column] = converted
+    encoder = LabelEncoder()
+    y = encoder.fit_transform(labels)
+    categorical = selected.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+    numerical = [column for column in selected.columns if column not in categorical]
+    preprocessor = ColumnTransformer([
+        ("cat", Pipeline([( "imputer", SimpleImputer(strategy="most_frequent")),
+                          ("encoder", OneHotEncoder(handle_unknown="ignore"))]), categorical),
+        ("num", Pipeline([( "imputer", SimpleImputer(strategy="median"))]), numerical),
+    ])
+    pipeline = Pipeline([("preprocessor", preprocessor), ("classifier", RandomForestClassifier(n_estimators=120, random_state=random_state, n_jobs=-1))])
+    X_train, X_test, y_train, y_test = train_test_split(selected, y, test_size=0.3, random_state=random_state, stratify=y)
+    pipeline.fit(X_train, y_train)
+    pre = pipeline.named_steps["preprocessor"]
+    train_encoded, test_encoded = pre.transform(X_train), pre.transform(X_test)
+    if hasattr(train_encoded, "toarray"):
+        train_encoded, test_encoded = train_encoded.toarray(), test_encoded.toarray()
+    model = pipeline.named_steps["classifier"]
+    return GermanCreditData(
+        pipeline, np.asarray(train_encoded), np.asarray(test_encoded), np.asarray(y_test), model.predict(test_encoded),
+        [int(c) for c in model.classes_], list(pre.get_feature_names_out()),
+        build_feature_metadata(pre, categorical, numerical), [str(label) for label in encoder.classes_],
     )

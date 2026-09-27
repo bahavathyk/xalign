@@ -6,6 +6,7 @@
     <meta name="description" content="Interactive German Credit explainability dashboard">
     <title>XAlign · German Credit Visual Analytics</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" defer></script>
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
     <script type="module" src="app.js"></script>
   </head>
@@ -16,6 +17,18 @@
         <h1>German Credit Visual Analytics</h1>
         <p>Compare TreeSHAP, KernelSHAP, and LIME explanations alongside the random-forest rules that support them.</p>
       </header>
+      <section id="upload-panel" class="upload-panel" aria-labelledby="custom-data-heading">
+        <h2 id="custom-data-heading">Use your own CSV dataset</h2>
+        <p class="help-text">Your file is processed locally in this browser. For fast results, analysis uses up to 3,000 rows and 20 categories per feature.</p>
+        <div class="upload-row">
+          <label>CSV file <input id="csv-upload" type="file" accept=".csv,text/csv"></label>
+          <label id="target-field" hidden>Target column <select id="target-select"></select></label>
+          <button id="analyze-upload" type="button" disabled>Analyze uploaded data</button>
+          <button id="reset-dataset" type="button" class="secondary-button">Use German Credit dataset</button>
+        </div>
+        <div id="feature-picker" class="feature-picker" hidden></div>
+        <p id="upload-status" class="upload-status" aria-live="polite">Using the built-in German Credit dataset.</p>
+      </section>
       <section class="controls" aria-label="Dashboard controls">
         <label>Predicted class <select id="class-select"></select></label>
         <label>Numeric bins <input id="bin-slider" type="range" min="3" max="30" value="10"><output id="bin-value" for="bin-slider">10</output></label>
