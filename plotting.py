@@ -21,7 +21,8 @@ def numeric_edges(data, bins: int):
     for name, info in data.metadata.items():
         if info.kind != "numerical":
             continue
-        values = data.X_test_encoded[:, index[info.encoded_columns[0]]]
+        values = np.concatenate((data.X_train_encoded[:, index[info.encoded_columns[0]]],
+                                 data.X_test_encoded[:, index[info.encoded_columns[0]]]))
         low, high = float(np.nanmin(values)), float(np.nanmax(values))
         if low == high:
             low, high = low - .5, high + .5

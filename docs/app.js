@@ -48,6 +48,27 @@ function ruleCount(feature, category, bin, classValue) {
 function heatmapAxis(labels, showticklabels) {
   return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels };
 }
+function formatFeatureValue(value) {
+  return new Intl.NumberFormat(undefined, { maximumSignificantDigits: 5 }).format(value);
+}
+function numericRangeAnnotations(features, axes, binCount) {
+  const ranges = state.data.bins[String(state.bins)].ranges || {};
+  const annotations = [];
+  if (!axes.length) return annotations;
+  features.forEach((feature, row) => {
+    const range = ranges[feature];
+    if (!range) return;
+    const [low, high] = range.map(formatFeatureValue);
+    axes.forEach((axis) => {
+      for (const [x, text, xanchor] of [[-0.5, low, "right"], [binCount - 0.5, high, "left"]]) {
+        annotations.push({ x, y: row, xref: `x${axis}`, yref: `y${axis}`, text, showarrow: false,
+          xanchor, yanchor: "middle", font: { size: 10, color: "#19222d" },
+          bgcolor: "rgba(255,255,255,0.82)", borderpad: 1 });
+      }
+    });
+  });
+  return annotations;
+}
 function uniqueValues(rows, column) {
   return [...new Set(rows.map((row) => String(row[column] ?? "").trim()).filter(Boolean))];
 }
@@ -181,7 +202,10 @@ function drawCategorical() {
   const layout = { ...chartLayout(`${feature.replaceAll("_", " ")} · comparison`, Math.max(500, categories.length * 36)),
     grid: { rows: 1, columns: columnCount, pattern: "independent" }, xaxis: { title: state.data.ruleLabel || "Rule count" }, yaxis: heatmapAxis(categories, true),
     shapes: overlayShapes([feature], labelsByFeature, { [feature]: 0 }, methodAxes, meta.kind === "categorical" ? (meta.states || 2) : state.bins),
-    annotations: [state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })), showlegend: false };
+    annotations: [
+      ...[state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
+      ...numericRangeAnnotations([feature], methodAxes, meta.kind === "categorical" ? 2 : state.bins),
+    ], showlegend: false };
   methodAxes.forEach((axis, index) => { layout[`xaxis${axis}`] = { title: meta.kind === "categorical" ? "Category state" : "Value bin" }; layout[`yaxis${axis}`] = heatmapAxis(categories, false); });
   Plotly.react($("categorical-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
@@ -200,11 +224,24 @@ function drawNumeric() {
   });
   const labelsByFeature = Object.fromEntries(features.map((feature) => [feature, [feature]]));
   const rowByFeature = Object.fromEntries(features.map((feature, index) => [feature, index]));
+  const heatmapWidth = 0.16;
+  const heatmapStart = 0.28;
+  const heatmapGap = 0.09;
+  const heatmapDomains = methodAxes.map((_, index) => {
+    const start = heatmapStart + index * (heatmapWidth + heatmapGap);
+    return [start, start + heatmapWidth];
+  });
   const layout = { ...chartLayout("Numerical features", Math.max(560, features.length * 36)),
-    grid: { rows: 1, columns: columnCount, pattern: "independent" }, xaxis: { title: state.data.ruleLabel || "Rule count" }, yaxis: heatmapAxis(displayFeatures, true),
+    xaxis: { domain: [0.0, 0.19], title: state.data.ruleLabel || "Rule count" }, yaxis: { domain: [0, 1], ...heatmapAxis(displayFeatures, true) },
     shapes: overlayShapes(features, labelsByFeature, rowByFeature, methodAxes, state.bins),
-    annotations: [state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })), showlegend: false };
-  methodAxes.forEach((axis) => { layout[`xaxis${axis}`] = { title: "Value bin" }; layout[`yaxis${axis}`] = heatmapAxis(displayFeatures, false); });
+    annotations: [
+      ...[state.data.ruleLabel || "Rules", ...state.data.methods].map((text, index) => ({ text, x: (index + 0.5) / columnCount, y: 1.08, xref: "paper", yref: "paper", showarrow: false, font: { size: 15, color: "#19222d" } })),
+      ...numericRangeAnnotations(features, methodAxes, state.bins),
+    ], showlegend: false };
+  methodAxes.forEach((axis, index) => {
+    layout[`xaxis${axis}`] = { domain: heatmapDomains[index], title: "Value bin", range: [-0.5, state.bins - 0.5] };
+    layout[`yaxis${axis}`] = { domain: [0, 1], ...heatmapAxis(displayFeatures, false) };
+  });
   Plotly.react($("numeric-chart"), traces, layout, { responsive: true, displaylogo: false });
 }
 function drawAll() {

@@ -39,7 +39,11 @@ def build_dashboard_payload(data, rules, explanations):
         edges = numeric_edges(data, bin_count)
         frames = {name: aggregate_explanations(result, data, edges) for name, result in explanations.items()}
         counts, _ = rule_statistics(rules, data.metadata, data.encoded_feature_names, edges)
-        by_bins[str(bin_count)] = {"records": serialise_records(frames), "rules": serialise_rules(counts)}
+        by_bins[str(bin_count)] = {
+            "records": serialise_records(frames),
+            "rules": serialise_rules(counts),
+            "ranges": {feature: [float(values[0]), float(values[-1])] for feature, values in edges.items()},
+        }
     return {"schemaVersion": 1, "classes": data.classes, "classLabels": data.class_labels or [str(c) for c in data.classes],
             "methods": list(explanations), "features": features, "bins": by_bins}
 
