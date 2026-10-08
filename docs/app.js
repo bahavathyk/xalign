@@ -49,7 +49,10 @@ function heatmapAxis(labels, showticklabels) {
   return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels };
 }
 function formatFeatureValue(value) {
-  return new Intl.NumberFormat(undefined, { maximumSignificantDigits: 5 }).format(value);
+  if (value !== 0 && (Math.abs(value) < 0.01 || Math.abs(value) > 1000)) {
+    return value.toExponential(2).replace("e+", "e");
+  }
+  return new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 function numericRangeAnnotations(features, axes, binCount) {
   const ranges = state.data.bins[String(state.bins)].ranges || {};
