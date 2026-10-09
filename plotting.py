@@ -69,6 +69,7 @@ def plot_feature_comparison(feature, metadata, explanations, rule_counts, cls, v
     bar_values = [sum(rule_counts.get((feature, category, bin_id, cls), 0) for bin_id in range(bins)) for category in rule_categories]
     axes[0].barh(np.arange(len(categories)), bar_values, color="#b8b8b8", edgecolor="#666", linewidth=.5)
     axes[0].set(yticks=np.arange(len(categories)), yticklabels=categories, xlabel="Rule count", title="Rules")
+    axes[0].tick_params(axis="y", pad=8)
     image = None
     for axis, (method, matrix) in zip(axes[1:], matrices.items()):
         image = axis.imshow(matrix, origin="lower", aspect="auto", cmap="RdBu_r", vmin=-vlim, vmax=vlim)
@@ -98,6 +99,7 @@ def plot_numeric_features_comparison(metadata, explanations, rule_counts, cls, v
                              gridspec_kw={"width_ratios": [1, 2.8, 2.8, 2.8]}, constrained_layout=True)
     axes[0].barh(np.arange(len(features)), rule_totals, color="#b8b8b8", edgecolor="#666", linewidth=.5)
     axes[0].set(yticks=np.arange(len(features)), yticklabels=[name.replace("_", " ") for name in features], xlabel="Rule count", title="Rules")
+    axes[0].tick_params(axis="y", pad=8)
     image = None
     maximum = rule_matrix.max()
     for axis, (method, matrix) in zip(axes[1:], matrices.items()):
@@ -129,5 +131,7 @@ def plot_overview(explanations, metadata, cls, vlim):
             values.append(float(subset.Importance.abs().mean()) if not subset.empty else 0.)
         image = axis.imshow(np.asarray(values)[:, None], origin="lower", aspect="auto", cmap="RdBu_r", vmin=-vlim, vmax=vlim)
         axis.set(title=method, xticks=[], yticks=np.arange(len(features)), yticklabels=features if axis is axes[0] else [])
+        if axis is axes[0]:
+            axis.tick_params(axis="y", pad=8)
     fig.colorbar(image, ax=axes, shrink=.85, label="Mean absolute importance")
     return fig

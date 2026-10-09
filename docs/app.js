@@ -15,7 +15,7 @@ function importanceLimit(features) {
 }
 function chartLayout(title, height = 560) {
   return { title: { text: title, x: 0.01, font: { size: 18 } }, height, autosize: true,
-    margin: { l: 175, r: 30, t: 62, b: 62 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent",
+    margin: { l: 205, r: 30, t: 62, b: 62 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent",
     font: { family: "system-ui, sans-serif", color: "#19222d" }, hoverlabel: { namelength: -1 } };
 }
 function matrixFor(method, feature, classValue) {
@@ -46,7 +46,8 @@ function ruleCount(feature, category, bin, classValue) {
     .reduce((sum, row) => sum + row.count, 0);
 }
 function heatmapAxis(labels, showticklabels) {
-  return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels };
+  return { automargin: true, showticklabels, tickmode: "array", tickvals: labels.map((_, index) => index), ticktext: labels,
+    ticks: showticklabels ? "outside" : "", ticklabelstandoff: showticklabels ? 8 : 0 };
 }
 function formatFeatureValue(value) {
   if (value !== 0 && (Math.abs(value) < 0.01 || Math.abs(value) > 1000)) {
@@ -234,7 +235,14 @@ function drawNumeric() {
     const start = heatmapStart + index * (heatmapWidth + heatmapGap);
     return [start, start + heatmapWidth];
   });
-  const layout = { ...chartLayout("Numerical features", Math.max(560, features.length * 36)),
+  // Size rows against the heatmap column width so cells are less elongated.
+  // All y axes keep the same domain and row coordinates, preserving alignment
+  // with the feature labels and rule-count bars.
+  const chart = $("numeric-chart");
+  const plotWidth = Math.max(1, (chart?.clientWidth || 1200) - 205 - 30);
+  const panelWidth = plotWidth * heatmapWidth;
+  const targetHeight = panelWidth / state.bins * features.length * 1.35 + 124;
+  const layout = { ...chartLayout("Numerical features", Math.max(360, Math.min(560, targetHeight))),
     xaxis: { domain: [0.0, 0.19], title: state.data.ruleLabel || "Rule count" }, yaxis: { domain: [0, 1], ...heatmapAxis(displayFeatures, true) },
     shapes: overlayShapes(features, labelsByFeature, rowByFeature, methodAxes, state.bins),
     annotations: [
